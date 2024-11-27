@@ -1,13 +1,18 @@
+import math
 import sys
 import os
+import json
 import cv2
 from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation
-from matplotlib.widgets import Slider, Button ,RangeSlider
+from matplotlib.widgets import Slider, Button ,RangeSlider,RadioButtons,TextBox
 from scipy.spatial import Delaunay
+from scipy.fftpack import fft
 import heapq
 import threading
 import tkinter
+import tkinter as tk
+from tkinter import ttk
 from tkinter.filedialog import askopenfilename
 from functools import partial
 import copy
@@ -17,7 +22,24 @@ from pathlib import Path
 class FourierRender(Scene):
 
     def construct(self):
+        self.init()
         path=self.dft_path()
+        factor = 6 / np.max(path[:, 1])
+        x_Offset = -(np.sum(path[:, 0] * factor) / len(path))
+        y_Offset = -3
+        fx = fft((path[:, 0]*factor+x_Offset) + (path[:, 1]*factor+y_Offset) * 1j)
+        fr = np.arange(len(fx))
+        N=len(fx)
+        srot = np.flipud(np.argsort(np.abs(fx)))
+        fx = fx[srot]
+        fr = fr[srot]
+        rf=np.array([np.dot(fx,[np.exp(1j*2*np.pi*n*k/N) for k in fr])/N for n in range(N)])
+        print("path路径")
+        print(path[:20,:])
+        print("fft路径")
+        print(rf[:20])
+        print(fx.ndim, "\t", fx.shape)
+        print(fx[0])
         #将数据归一化到0-6
         factor=6/np.max(path[:,1])
         x_Offset=-(np.sum(path[:,0]*factor)/len(path))
@@ -26,7 +48,7 @@ class FourierRender(Scene):
         print(c1.size)
         self.dotxyz=[0,0,0]
         #傅里叶参数，运用的数值积分的方式
-        fre = np.linspace(-300, 300, 601)
+        fre = np.linspace(-self.frequency_range,self.frequency_range, 2*self.frequency_range+1)
         kwr = np.array(
             [np.dot(c1,[np.exp(-2*np.pi*n*t*1j)/c1.size for t in np.linspace(0,1,c1.size+1)[:-1]]) for n in fre])
         #按照每个本轮的模长排序
@@ -40,28 +62,68 @@ class FourierRender(Scene):
         fre=np.array(fres)
 
         def guij(dec):
-            t=dec/600
-            lisc=np.dot(kwr,[np.exp(2*np.pi*fre[n]*t*1j) for n in range(fre.size)])
-            return [lisc.real,lisc.imag,0]
+            if self.model:
+                lisc = np.dot(fx, [np.exp(1j * 2 * np.pi * dec * k / N) for k in fr]) / N
+                return [lisc.real, lisc.imag, 0]
+            else:
+                t=dec/self.frame_length
+                lisc=np.dot(kwr,[np.exp(2*np.pi*fre[n]*t*1j) for n in range(fre.size)])
+                return [lisc.real,lisc.imag,0]
+        def guij1(dec):
+            lisc = np.dot(fx,[np.exp(1j*2*np.pi*dec*k/N) for k in fr])/N
+            return [lisc.real, lisc.imag, 0]
 
         def lincirs(dec):
-            t=dec/600
-            lisc=kwr*np.array([np.exp(2*np.pi*fre[n]*t*1j) for n in range(fre.size)])
+            if self.model:
+                lisc = fx * np.array([np.exp(1j * 2 * np.pi * dec * k / N) for k in fr]) / N
+                xyz = [0, 0, 0]
+                xyz1 = [0, 0, 0]
+                vg = VGroup()
+                for n in range(len(fr)):
+                    xyz[0] += lisc[n].real
+                    xyz[1] += lisc[n].imag
+                    if xyz[0] != xyz1[0] and xyz[1] != xyz1[1]:
+                        if np.abs(fx[n]) / N > 0.01 and n > 0:
+                            vg.add(Circle(np.abs(fx[n]) / N, stroke_width=2).move_to(xyz1))
+                        vg.add(Line(xyz1, xyz, color=YELLOW, stroke_width=2))
+                    xyz1[0] = xyz[0]
+                    xyz1[1] = xyz[1]
+                self.dotxyz = copy.deepcopy(xyz)
+                return vg
+            else:
+                t=dec/self.frame_length
+                lisc=kwr*np.array([np.exp(2*np.pi*fre[n]*t*1j) for n in range(fre.size)])
+                xyz=[0,0,0]
+                xyz1=[0,0,0]
+                vg = VGroup()
+                for n in range(fre.size):
+                    xyz[0]+=lisc[n].real
+                    xyz[1]+=lisc[n].imag
+                    if xyz[0]!=xyz1[0] or xyz[1]!=xyz1[1]:
+                        if np.abs(kwr[n])>0.1 and n>0:
+                            vg.add(Circle(np.abs(kwr[n]),stroke_width=2).move_to(xyz1))
+                        vg.add(Line(xyz1,xyz,color=YELLOW,stroke_width=2))
+                    xyz1[0]=xyz[0]
+                    xyz1[1]=xyz[1]
+                self.dotxyz=copy.deepcopy(xyz)
+                return vg
+
+        def lincirs1(dec):
+            lisc=fx*np.array([np.exp(1j*2*np.pi*dec*k/N) for k in fr])/N
             xyz=[0,0,0]
             xyz1=[0,0,0]
             vg = VGroup()
-            for n in range(fre.size):
+            for n in range(len(fr)):
                 xyz[0]+=lisc[n].real
                 xyz[1]+=lisc[n].imag
-                if xyz[0]!=xyz1[0] or xyz[1]!=xyz1[1]:
-                    if np.abs(kwr[n])>0.1 and n>0:
-                        vg.add(Circle(np.abs(kwr[n]),stroke_width=2).move_to(xyz1))
+                if xyz[0]!=xyz1[0] and xyz[1]!=xyz1[1]:
+                    if np.abs(fx[n])/N>0.1 and n>0:
+                        vg.add(Circle(np.abs(fx[n])/N,stroke_width=2).move_to(xyz1))
                     vg.add(Line(xyz1,xyz,color=YELLOW,stroke_width=2))
                 xyz1[0]=xyz[0]
                 xyz1[1]=xyz[1]
             self.dotxyz=copy.deepcopy(xyz)
             return vg
-
 
         axes = Axes(
             x_range=[-3, 3, 1],
@@ -92,15 +154,191 @@ class FourierRender(Scene):
         Gcirlin=always_redraw(lambda:lincirs(decimal.get_value()))
 
         self.add(axes,decimal,Gcirlin,pdot1,dot)
-        self.play(alpha.animate.set_value(1),rate_func=linear,run_time=10)
+        self.play(alpha.animate.set_value(1),rate_func=linear,run_time=self.get_time())
 
 
     def dft_path(self):
-        param_computer = CalculatePath()
-        param_computer.render()
-        param_computer.animation()
-        return param_computer.get_path()
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        file_name = "points.npy"
+        file_path = os.path.join(current_dir, file_name)
+        loaded_point = np.load(file_path)
 
+        ncontour = loaded_point.copy()
+        max_xy = 1 / np.max((np.max(ncontour[:, 0]), np.max(ncontour[:, 1])))
+        ncontour = ncontour.astype(np.float64)
+        ncontour *= max_xy
+        return ncontour
+
+    def init(self):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        config_file = os.path.join(current_dir, "config.json")
+        with open(config_file, "r") as f:
+            loaded_config = json.load(f)
+        self.length=loaded_config['length']
+        self.frame_rate=loaded_config['frame_rate']
+        self.frequency_range=loaded_config['frequency_range']
+        self.frame_length=loaded_config['frame_length']
+        self.model=loaded_config['model']
+
+    def get_time(self):
+        if self.model:
+            time=math.ceil(self.length/self.frame_rate)
+            return time
+        else:
+            time=math.ceil(self.frame_length/self.frame_rate)
+            return time
+
+    def save_data(self):
+        config = {
+            "length": self.length,
+            "frame_rate": self.frame_rate,
+            "frequency_range": self.frequency_range,
+            "frame_length": self.frame_length,
+            "model": self.model
+        }
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        config_file = os.path.join(current_dir, "config.json")
+        with open(config_file, "w") as f:
+            json.dump(config, f, indent=4)
+        print(f"配置已保存到 {config_file}")
+
+
+
+
+class Parameters:
+
+    def __init__(self,length):
+        self.length = length
+        self.quality = "l"
+        self.frame_rate = 30
+        self.frequency_range = 300
+        self.frame_length = 600
+        self.model = False
+
+    def save_data(self):
+        config = {
+            "length": self.length,
+            "frame_rate": self.frame_rate,
+            "frequency_range": self.frequency_range,
+            "frame_length": self.frame_length,
+            "model": self.model
+        }
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        config_file = os.path.join(current_dir, "config.json")
+        with open(config_file, "w") as f:
+            json.dump(config, f, indent=4)
+        print(f"配置已保存到 {config_file}")
+
+    def video_parameters(self):
+
+        return (self.quality,self.frame_rate)
+
+    def show_ui(self):
+        # 创建主图形和子图
+        self.fig, self.ax = plt.subplots()
+        plt.subplots_adjust(left=0.3, bottom=0.4)  # 调整布局
+        self.ax.set_axis_off()  # 关闭坐标轴显示
+
+        # 初始化变量
+        self.current_method = "method1"  # 当前选择的计算方式
+        self.current_quality = "Medium"  # 当前选择的画质
+        self.result = 0  # 计算结果
+
+        # 创建单选按钮组：计算方式
+        self.radio_method_ax = plt.axes([0.1, 0.5, 0.2, 0.2])  # 定义按钮位置
+        self.radio_method = RadioButtons(self.radio_method_ax, ["FT", "DFT"])
+        self.radio_method.on_clicked(self.switch_method)
+
+        # 创建单选按钮组：画质
+        self.radio_quality_ax = plt.axes([0.1, 0.2, 0.2, 0.25])  # 定义按钮位置
+        self.radio_quality = RadioButtons(self.radio_quality_ax, ["Low", "Medium", "High"])
+        self.radio_quality.on_clicked(self.switch_quality)
+        #提示文字
+        self.ax.text(-0.34, 0.66, 'Calculation method',ha="left", va="center", color="blue", fontsize=10)
+        self.ax.text(-0.34, 0.15, 'Video quality',ha="left", va="center", color="blue", fontsize=10)
+        # 创建文本输入框（方式 1 参数）
+        self.textbox_framerate_ax = plt.axes([0.6, 0.4, 0.2, 0.05])  # 定义帧率输入框位置
+        self.textbox_framerate = TextBox(self.textbox_framerate_ax, "Frame Rate:",initial="30")
+
+        self.textbox_frequency_ax = plt.axes([0.6, 0.3, 0.2, 0.05])  # 定义频率输入框位置
+        self.textbox_frequency = TextBox(self.textbox_frequency_ax, "Frequency:",initial="100")
+
+        self.textbox_length_ax = plt.axes([0.6, 0.2, 0.2, 0.05])  # 定义帧长度输入框位置
+        self.textbox_length = TextBox(self.textbox_length_ax, "Frame Length:",initial="600")
+
+        # 创建计算按钮
+        self.calc_button_ax = plt.axes([0.4, 0.05, 0.2, 0.1])  # 定义按钮位置
+        self.calc_button = Button(self.calc_button_ax, "Calculate")
+        self.calc_button.on_clicked(self.calculate)
+
+        # 创建显示结果的文本
+        self.result_text = self.ax.text(0.4, 0.8, "Total Duration: Not calculated",
+                                        ha="center", va="center", fontsize=12,color="green")
+
+        # 初始状态
+        self.update_inputs_visibility()
+        plt.show()
+
+    def switch_method(self, label):
+        """切换计算方式"""
+        self.current_method = "method1" if label == "FT" else "method2"
+        self.update_inputs_visibility()
+
+    def switch_quality(self, label):
+        """切换画质等级"""
+        self.current_quality = label
+
+    def update_inputs_visibility(self):
+        """更新输入框的可见性"""
+        if self.current_method == "method1":
+            # 方式 1 显示所有参数
+            self.textbox_framerate_ax.set_visible(True)
+            self.textbox_frequency_ax.set_visible(True)
+            self.textbox_length_ax.set_visible(True)
+        else:
+            # 方式 2 隐藏不必要的参数
+            self.textbox_framerate_ax.set_visible(True)
+            self.textbox_frequency_ax.set_visible(False)
+            self.textbox_length_ax.set_visible(False)
+        self.fig.canvas.draw_idle()
+
+    def calculate(self, event):
+        """执行计算逻辑"""
+        try:
+            # 根据画质等级设置权重
+            quality_weights = {"Low":"l", "Medium": "m", "High": "h"}
+            quality_factor = quality_weights[self.current_quality]
+
+            if self.current_method == "method1":
+                # 方式 1 的计算公式
+                framerate = self.textbox_framerate.text
+                frequency = self.textbox_frequency.text
+                frame_length = self.textbox_length.text
+                if framerate.isdigit() and frequency.isdigit() and frame_length.isdigit():
+                    framerate = int(framerate)
+                    frequency = int(frequency)
+                    frame_length = int(frame_length)
+                    self.model=False
+                    self.quality=quality_factor
+                    self.frame_rate=framerate
+                    self.frequency_range=frequency
+                    self.frame_length=frame_length
+                    self.result = frame_length/framerate
+            else:
+                # 方式 2 的计算公式（示例公式）
+                framerate = self.textbox_framerate.text
+                if framerate.isdigit():
+                    framerate = int(framerate)
+                    self.model=True
+                    self.frame_rate = framerate
+                    self.quality = quality_factor
+                    self.result = self.length/framerate
+            # 更新结果文本
+            self.result_text.set_text(f"Total Duration: {self.result:.2f}")
+        except ValueError:
+            # 输入无效时显示错误提示
+            self.result_text.set_text("Invalid input. Please check!")
+        self.fig.canvas.draw_idle()
 
 class CalculatePath:
 
@@ -502,6 +740,10 @@ class CalculatePath:
         # 显示动画
         plt.show()
 
+    def get_length(self):
+
+        return len(self.path)
+
     def get_path(self):
         ncontour=self.path.copy()
         max_xy=1/np.max((np.max(ncontour[:,0]),np.max(ncontour[:,1])))
@@ -512,9 +754,11 @@ class CalculatePath:
     def save(self):
         file_name_first_10 = os.path.splitext(os.path.basename(self.file_name))[0][:10]
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        file_name=file_name_first_10+".txt"
+        #file_name=file_name_first_10+".txt"
+        file_name = "points.npy"
         file_path = os.path.join(current_dir, file_name)
-        np.savetxt(file_path, self.path, header="x y", fmt="%d", delimiter="\t")
+        #np.savetxt(file_path, self.path, header="x y", fmt="%d", delimiter="\t")
+        np.save(file_path, self.path)
 
     def render(self):
         self._init_image()
@@ -558,5 +802,15 @@ class CalculatePath:
 
 
 if __name__ == "__main__":
+    param_computer = CalculatePath()
+    param_computer.render()
+    param_computer.animation()
+    param_computer.save()
+
+    parameter=Parameters(param_computer.get_length())
+    parameter.show_ui()
+    parameter.save_data()
+    quality,rate=parameter.video_parameters()
+
     filename=Path(__file__).resolve().name
-    os.system(f"manim -pqh  {filename} FourierRender")
+    os.system(f"manim -pq{quality} --fps {rate} {filename} FourierRender")
