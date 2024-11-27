@@ -13,6 +13,9 @@
 ## 动画
 
 ![db77b87a-831c-431d-8986-dbf608ccc46e](https://github.com/user-attachments/assets/bd6360eb-d03e-4fd9-a288-3ce31527f965)
+## 参数配置
+
+![1417](https://github.com/user-attachments/assets/58d73607-c400-4712-ab08-d3cf3f866f9b)
 
 ## manim渲染
 
